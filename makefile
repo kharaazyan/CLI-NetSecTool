@@ -1,6 +1,6 @@
 # === Project Metadata ===
-PROJECT      := CLIApp
-VERSION      := 1.0.0
+PROJECT      := cli-netsectool
+VERSION      := 2.0.0
 
 # === Directories ===
 SRC_DIR      := src
@@ -22,8 +22,8 @@ WGET         := wget
 GIT          := git
 
 # === Flags ===
-CXXFLAGS     := -std=c++20 -Wall -Wextra -I$(INC_DIR) -I$(EXTERNAL_DIR) -pthread
-LDFLAGS      := -pthread -lcurl -lssl -lcrypto
+CXXFLAGS     := -std=c++20 -Wall -Wextra -I$(INC_DIR) -I$(EXTERNAL_DIR) -I$(EXTERNAL_DIR)/termcolor -I. -pthread -w
+LDFLAGS      := -pthread -lcurl -lssl -lcrypto -lspdlog
 DEBUG_FLAGS  := -g -O0 -DDEBUG
 RELEASE_FLAGS:= -O2 -DNDEBUG
 
@@ -36,6 +36,8 @@ BUILD_TYPE   := Release
 SRCS         := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS         := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(SRCS))
 DEPS         := $(OBJS:.o=.d)
+
+# Config is header-only, no separate compilation needed
 
 # === Executable(s) ===
 TARGET       := $(BIN_DIR)/$(PROJECT)
@@ -56,11 +58,13 @@ else
 endif
 
 # === External Dependencies URLs ===
+IPFS_URL := https://dist.ipfs.tech/kubo/v0.20.0/kubo_v0.20.0_linux-amd64.tar.gz
 NLOHMANN_JSON_URL := https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp
+SPDLOG_URL := https://github.com/gabime/spdlog/releases/download/v1.12.0/spdlog.hpp
 TERMCOLOR_URL := https://raw.githubusercontent.com/ikalnytskyi/termcolor/master/include/termcolor/termcolor.hpp
 
 # === Dependency Checks ===
-.PHONY: check-deps install-deps check-system-libs download-external-deps
+.PHONY: check-deps install-deps check-system-libs download-external-deps check-ipfs install-ipfs
 
 # Check system libraries
 check-system-libs:
@@ -79,13 +83,41 @@ check-system-libs:
 	@which pkg-config > /dev/null 2>&1 || \
 		(echo "$(YELLOW)[WARN] pkg-config not found. Installing...$(NC)" && \
 		sudo apt-get install -y pkg-config || true)
+	
+	@echo "$(BLUE)[INFO] Checking spdlog...$(NC)"
+	@pkg-config --exists spdlog || \
+		(echo "$(YELLOW)[WARN] spdlog not found. Installing...$(NC)" && \
+		sudo apt-get install -y libspdlog-dev || true)
+	
+	@echo "$(BLUE)[INFO] Checking nlohmann-json...$(NC)"
+	@pkg-config --exists nlohmann_json || \
+		(echo "$(YELLOW)[WARN] nlohmann-json not found. Installing...$(NC)" && \
+		sudo apt-get install -y nlohmann-json3-dev || true)
 	@echo "$(GREEN)[✔] System libraries check passed$(NC)"
+
+# Check if IPFS is installed
+check-ipfs:
+	@echo "$(BLUE)[INFO] Checking IPFS installation...$(NC)"
+	@which ipfs > /dev/null 2>&1 || \
+		(echo "$(YELLOW)[WARN] IPFS not found. Installing...$(NC)" && $(MAKE) install-ipfs)
+	@echo "$(GREEN)[✔] IPFS check passed$(NC)"
+
+# Install IPFS
+install-ipfs:
+	@echo "$(BLUE)[INFO] Installing IPFS manually...$(NC)"
+	@mkdir -p $(DEPS_DIR)
+	@cd $(DEPS_DIR) && \
+		($(WGET) -q $(IPFS_URL) -O ipfs.tar.gz || $(CURL) -L -o ipfs.tar.gz $(IPFS_URL)) && \
+		tar -xzf ipfs.tar.gz && \
+		sudo cp kubo/ipfs /usr/local/bin/ && \
+		rm -rf kubo ipfs.tar.gz
+	@rm -rf $(DEPS_DIR)
+	@echo "$(GREEN)[✔] IPFS installed successfully$(NC)"
 
 # Download external dependencies
 download-external-deps:
 	@echo "$(BLUE)[INFO] Downloading external dependencies...$(NC)"
 	@mkdir -p $(EXTERNAL_DIR)
-	@mkdir -p $(EXTERNAL_DIR)/termcolor
 	
 	# Download nlohmann/json
 	@echo "$(BLUE)[INFO] Downloading nlohmann/json v3.12.0...$(NC)"
@@ -98,8 +130,20 @@ download-external-deps:
 		echo "$(GREEN)[✔] nlohmann/json already exists$(NC)"; \
 	fi
 	
+	# Download spdlog
+	@echo "$(BLUE)[INFO] Downloading spdlog...$(NC)"
+	@if [ ! -f $(EXTERNAL_DIR)/spdlog.hpp ]; then \
+		($(WGET) -q $(SPDLOG_URL) -O $(EXTERNAL_DIR)/spdlog.hpp || \
+		$(CURL) -L -o $(EXTERNAL_DIR)/spdlog.hpp $(SPDLOG_URL)) && \
+		echo "$(GREEN)[✔] spdlog downloaded$(NC)" || \
+		echo "$(RED)[ERROR] Failed to download spdlog$(NC)"; \
+	else \
+		echo "$(GREEN)[✔] spdlog already exists$(NC)"; \
+	fi
+	
 	# Download termcolor
 	@echo "$(BLUE)[INFO] Downloading termcolor...$(NC)"
+	@mkdir -p $(EXTERNAL_DIR)/termcolor
 	@if [ ! -f $(EXTERNAL_DIR)/termcolor/termcolor.hpp ]; then \
 		($(WGET) -q $(TERMCOLOR_URL) -O $(EXTERNAL_DIR)/termcolor/termcolor.hpp || \
 		$(CURL) -L -o $(EXTERNAL_DIR)/termcolor/termcolor.hpp $(TERMCOLOR_URL)) && \
@@ -110,7 +154,7 @@ download-external-deps:
 	fi
 
 # Check and install system dependencies
-check-deps: check-system-libs
+check-deps: check-ipfs check-system-libs
 	@echo "$(BLUE)[INFO] Checking system dependencies...$(NC)"
 	@which apt-get > /dev/null 2>&1 || \
 		(echo "$(RED)[ERROR] apt-get not found. This makefile is for Ubuntu only.$(NC)" && exit 1)
@@ -123,15 +167,24 @@ install-deps: check-deps download-external-deps
 	@sudo apt-get update || true
 	@sudo apt-get install -y build-essential || true
 	@sudo apt-get install -y curl wget git pkg-config || true
-	@sudo apt-get install -y libcurl4-openssl-dev libssl-dev || true
+	@sudo apt-get install -y libcurl4-openssl-dev libssl-dev libspdlog-dev nlohmann-json3-dev || true
 	@echo "$(GREEN)[✔] Dependencies installation complete$(NC)"
 
 # === Build Targets ===
-.PHONY: all clean rebuild install uninstall test lint format docs help deps main
+.PHONY: all clean rebuild install uninstall test lint format docs help deps main setup auto-clean
 
 # Default target
 all: deps main
 	@echo "$(GREEN)[✔] Build complete ($(BUILD_TYPE))$(NC)"
+
+# Setup target - run setup script
+setup:
+	@echo "$(BLUE)[INFO] Running setup script...$(NC)"
+	@if [ -f setup.sh ]; then \
+		chmod +x setup.sh && ./setup.sh; \
+	else \
+		echo "$(YELLOW)[WARN] setup.sh not found. Skipping setup.$(NC)"; \
+	fi
 
 # Dependencies target
 deps: install-deps
@@ -168,6 +221,15 @@ clean-external:
 clean-all: clean clean-deps clean-external
 	@echo "$(GREEN)[✔] All cleaned$(NC)"
 
+# Auto-clean target
+auto-clean:
+	@echo "$(BLUE)[INFO] Running auto-clean...$(NC)"
+	@if [ -f auto-clean.sh ]; then \
+		chmod +x auto-clean.sh && ./auto-clean.sh; \
+	else \
+		echo "$(YELLOW)[WARN] auto-clean.sh not found.$(NC)"; \
+	fi
+
 rebuild: clean all
 
 # === Installation Targets ===
@@ -189,13 +251,15 @@ help:
 	@echo "$(GREEN)Usage:$(NC) make [target] [V=1]"
 	@echo ""
 	@echo "$(GREEN)Build Targets:$(NC)"
-	@echo "  all        - Build both main and cli (default)"
+	@echo "  all        - Setup, install deps, and build (default)"
+	@echo "  setup      - Run automated setup script"
 	@echo "  main       - Build only main executable"
 	@echo "  deps       - Install all dependencies"
 	@echo "  clean      - Remove build artifacts"
 	@echo "  clean-deps - Remove downloaded dependencies"
 	@echo "  clean-external - Remove external libraries"
 	@echo "  clean-all  - Remove all artifacts and dependencies"
+	@echo "  auto-clean - Run auto-clean script"
 	@echo "  rebuild    - Clean and build"
 	@echo ""
 	@echo "$(GREEN)Installation Targets:$(NC)"
@@ -208,7 +272,10 @@ help:
 	@echo "$(GREEN)Dependencies:$(NC)"
 	@echo "  C++20 compiler (g++)"
 	@echo "  nlohmann/json v3.12.0"
+	@echo "  spdlog v1.12.0 (logging)"
 	@echo "  libcurl (HTTP requests)"
 	@echo "  libssl (encryption/decryption)"
+	@echo "  libcrypto++ (advanced cryptography)"
 	@echo "  termcolor (CLI colors)"
+	@echo "  IPFS v0.20.0 (distributed storage)"
 	@echo "  Standard Ubuntu libraries" 
