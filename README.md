@@ -366,18 +366,6 @@ make install
 | **libssl** | System | Cryptographic operations |
 | **IPFS** | v0.22.0 | Distributed storage access |
 
-### 🧪 Testing
-
-```bash
-# Run basic tests
-make test
-
-# Performance testing
-./bin/CLIApp --benchmark
-
-# Memory leak detection
-valgrind --leak-check=full ./bin/CLIApp
-```
 
 ## 📈 Benchmarks
 
