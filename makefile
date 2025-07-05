@@ -1,5 +1,5 @@
 # === Project Metadata ===
-PROJECT      := sergo
+PROJECT      := CLIApp
 VERSION      := 1.0.0
 
 # === Directories ===
@@ -28,14 +28,9 @@ DEBUG_FLAGS  := -g -O0 -DDEBUG
 RELEASE_FLAGS:= -O2 -DNDEBUG
 
 # === Build Type ===
-BUILD        ?= debug
-ifeq ($(BUILD),release)
-    CXXFLAGS += $(RELEASE_FLAGS)
-    BUILD_TYPE := Release
-else
-    CXXFLAGS += $(DEBUG_FLAGS)
-    BUILD_TYPE := Debug
-endif
+BUILD        := release
+CXXFLAGS     += $(RELEASE_FLAGS)
+BUILD_TYPE   := Release
 
 # === Source/Objects/Deps ===
 SRCS         := $(wildcard $(SRC_DIR)/*.cpp)
@@ -44,7 +39,6 @@ DEPS         := $(OBJS:.o=.d)
 
 # === Executable(s) ===
 TARGET       := $(BIN_DIR)/$(PROJECT)
-CLI_TARGET   := $(BIN_DIR)/cli
 
 # === Colors ===
 GREEN        := \033[0;32m
@@ -63,6 +57,7 @@ endif
 
 # === External Dependencies URLs ===
 NLOHMANN_JSON_URL := https://github.com/nlohmann/json/releases/download/v3.12.0/json.hpp
+TERMCOLOR_URL := https://raw.githubusercontent.com/ikalnytskyi/termcolor/master/include/termcolor/termcolor.hpp
 
 # === Dependency Checks ===
 .PHONY: check-deps install-deps check-system-libs download-external-deps
@@ -90,6 +85,7 @@ check-system-libs:
 download-external-deps:
 	@echo "$(BLUE)[INFO] Downloading external dependencies...$(NC)"
 	@mkdir -p $(EXTERNAL_DIR)
+	@mkdir -p $(EXTERNAL_DIR)/termcolor
 	
 	# Download nlohmann/json
 	@echo "$(BLUE)[INFO] Downloading nlohmann/json v3.12.0...$(NC)"
@@ -100,6 +96,17 @@ download-external-deps:
 		echo "$(RED)[ERROR] Failed to download nlohmann/json$(NC)"; \
 	else \
 		echo "$(GREEN)[✔] nlohmann/json already exists$(NC)"; \
+	fi
+	
+	# Download termcolor
+	@echo "$(BLUE)[INFO] Downloading termcolor...$(NC)"
+	@if [ ! -f $(EXTERNAL_DIR)/termcolor/termcolor.hpp ]; then \
+		($(WGET) -q $(TERMCOLOR_URL) -O $(EXTERNAL_DIR)/termcolor/termcolor.hpp || \
+		$(CURL) -L -o $(EXTERNAL_DIR)/termcolor/termcolor.hpp $(TERMCOLOR_URL)) && \
+		echo "$(GREEN)[✔] termcolor downloaded$(NC)" || \
+		echo "$(RED)[ERROR] Failed to download termcolor$(NC)"; \
+	else \
+		echo "$(GREEN)[✔] termcolor already exists$(NC)"; \
 	fi
 
 # Check and install system dependencies
@@ -120,10 +127,10 @@ install-deps: check-deps download-external-deps
 	@echo "$(GREEN)[✔] Dependencies installation complete$(NC)"
 
 # === Build Targets ===
-.PHONY: all clean rebuild install uninstall test lint format docs help deps main cli
+.PHONY: all clean rebuild install uninstall test lint format docs help deps main
 
 # Default target
-all: deps main cli
+all: deps main
 	@echo "$(GREEN)[✔] Build complete ($(BUILD_TYPE))$(NC)"
 
 # Dependencies target
@@ -133,15 +140,7 @@ deps: install-deps
 main: $(TARGET)
 	@echo "$(GREEN)[✔] Main built successfully$(NC)"
 
-# Build CLI executable
-cli: $(CLI_TARGET)
-	@echo "$(GREEN)[✔] CLI built successfully$(NC)"
-
-$(TARGET): $(BUILD_DIR)/main.o | $(BIN_DIR)
-	@echo "$(YELLOW)[Linking] $@$(NC)"
-	$(Q)$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
-
-$(CLI_TARGET): $(filter-out $(BUILD_DIR)/main.o,$(OBJS)) | $(BIN_DIR)
+$(TARGET): $(OBJS) | $(BIN_DIR) $(BUILD_DIR) $(DIST_DIR) $(DEPS_DIR) $(EXTERNAL_DIR)
 	@echo "$(YELLOW)[Linking] $@$(NC)"
 	$(Q)$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
@@ -172,29 +171,26 @@ clean-all: clean clean-deps clean-external
 rebuild: clean all
 
 # === Installation Targets ===
-install: $(TARGET) $(CLI_TARGET)
+install: $(TARGET)
 	@echo "$(BLUE)[INFO] Installing $(PROJECT)...$(NC)"
 	@sudo cp $(TARGET) /usr/local/bin/ || \
 		(echo "$(RED)[ERROR] Failed to install main. Try running with sudo.$(NC)" && exit 1)
-	@sudo cp $(CLI_TARGET) /usr/local/bin/ || \
-		(echo "$(RED)[ERROR] Failed to install cli. Try running with sudo.$(NC)" && exit 1)
-	@echo "$(GREEN)[✔] $(PROJECT) and cli installed to /usr/local/bin/$(NC)"
+	@echo "$(GREEN)[✔] $(PROJECT) installed to /usr/local/bin/$(NC)"
 
 uninstall:
 	@echo "$(BLUE)[INFO] Uninstalling $(PROJECT)...$(NC)"
-	@sudo rm -f /usr/local/bin/$(PROJECT) /usr/local/bin/cli || true
+	@sudo rm -f /usr/local/bin/$(PROJECT) || true
 	@echo "$(GREEN)[✔] $(PROJECT) uninstalled$(NC)"
 
 # === Help ===
 help:
 	@echo "$(BLUE)Sergo Decryptor Build System (Ubuntu Only)$(NC)"
 	@echo ""
-	@echo "$(GREEN)Usage:$(NC) make [target] [BUILD=debug|release] [V=1]"
+	@echo "$(GREEN)Usage:$(NC) make [target] [V=1]"
 	@echo ""
 	@echo "$(GREEN)Build Targets:$(NC)"
 	@echo "  all        - Build both main and cli (default)"
 	@echo "  main       - Build only main executable"
-	@echo "  cli        - Build only cli executable"
 	@echo "  deps       - Install all dependencies"
 	@echo "  clean      - Remove build artifacts"
 	@echo "  clean-deps - Remove downloaded dependencies"
@@ -207,7 +203,6 @@ help:
 	@echo "  uninstall  - Remove from system"
 	@echo ""
 	@echo "$(GREEN)Variables:$(NC)"
-	@echo "  BUILD      - debug (default) or release"
 	@echo "  V          - Verbose build (V=1)"
 	@echo ""
 	@echo "$(GREEN)Dependencies:$(NC)"

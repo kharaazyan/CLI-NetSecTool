@@ -1,5 +1,5 @@
 #pragma once
 #include <string>
-#include <nlohmann/json.hpp>
+#include "json.hpp"
 
 nlohmann::json decryptAndParse(const std::string& jsonData, const std::string& privateKeyPath);
